@@ -4,9 +4,9 @@ A modern iOS/macOS document reader app for PDFs and EPUBs with AI-powered analys
 
 ## Screenshots
 
-![Screenshot 1](screenshots/Screenshot%202025-12-06%20at%201.39.43%20PM.png?raw=true)
+![Screenshot 1](screenshots/1.png?raw=true)
 
-![Screenshot 2](screenshots/Screenshot%202025-12-06%20at%201.39.55%20PM.png?raw=true)
+![Screenshot 2](screenshots/2.png?raw=true)
 
 ## Features
 
