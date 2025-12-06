@@ -35,13 +35,18 @@ Explain this to me in comprehensive, simple terms. Use LaTeX for math expression
 
 LaTeX formatting rules:
 - Use $...$ for inline math and $$...$$ for display math
-- For matrices, do NOT use \\begin{pmatrix}, \\begin{bmatrix}, or \\begin{matrix} environments
-  Instead represent matrices as: $A = \\binom{a \\quad b}{c \\quad d}$ for a 2x2 matrix with parentheses
+- NEVER use environment blocks like \\begin{...} or \\end{...} - these are not supported
+  This includes: array, matrix, pmatrix, bmatrix, align, aligned, cases, equation, etc.
+- For matrices, represent them as: $A = \\binom{a \\quad b}{c \\quad d}$ for a 2x2 matrix
   For vectors use: $\\binom{x}{y}$ which renders as a column vector
-- Use \\\\ (double backslash) for line breaks, never single backslash
+- For systems of equations, write each equation on a separate line using plain text, with inline LaTeX for each equation
+  Example: Instead of using \\begin{array}, write:
+  $2x_1 + 3x_2 - x_3 = 5$
+  $x_1 - x_2 + 4x_3 = 10$
 - Avoid \\text{}, \\textbf{}, \\textit{}, \\boldsymbol{}, \\operatorname{} - use plain text outside LaTeX instead
 - Avoid \\underset{} - use subscripts like x_{subscript} instead
 - For dots, use \\cdots only (not \\dots, \\ldots, \\vdots, \\hdots)
+- For arrows: use \\Rightarrow instead of \\implies, \\Leftrightarrow instead of \\iff, \\Leftarrow instead of \\impliedby
 - Keep LaTeX expressions simple and avoid complex nested structures
 """
     
@@ -110,7 +115,7 @@ LaTeX formatting rules:
         do {
             // Initialize Firebase AI
             let ai = FirebaseAI.firebaseAI(backend: .googleAI())
-            let model = ai.generativeModel(modelName: "gemini-2.5-flash")
+            let model = ai.generativeModel(modelName: "gemini-2.5-flash-lite")
             
             // Generate content stream
             let contentStream = try model.generateContentStream(image, prompt)

@@ -106,6 +106,27 @@ class LatexImageRenderer {
         result = result.replacingOccurrences(of: "\\begin{matrix}", with: "")
         result = result.replacingOccurrences(of: "\\end{matrix}", with: "")
         
+        // Remove array environments - SwiftMath doesn't support them
+        // Handle \begin{array}{...} with column specifiers
+        result = result.replacingOccurrences(
+            of: #"\\begin\{array\}\{[^}]*\}"#,
+            with: "",
+            options: .regularExpression
+        )
+        result = result.replacingOccurrences(of: "\\end{array}", with: "")
+        
+        // Remove align/aligned environments
+        result = result.replacingOccurrences(of: "\\begin{align}", with: "")
+        result = result.replacingOccurrences(of: "\\end{align}", with: "")
+        result = result.replacingOccurrences(of: "\\begin{align*}", with: "")
+        result = result.replacingOccurrences(of: "\\end{align*}", with: "")
+        result = result.replacingOccurrences(of: "\\begin{aligned}", with: "")
+        result = result.replacingOccurrences(of: "\\end{aligned}", with: "")
+        
+        // Remove cases environment
+        result = result.replacingOccurrences(of: "\\begin{cases}", with: "")
+        result = result.replacingOccurrences(of: "\\end{cases}", with: "")
+        
         // Remove | used as column separators in matrices
         // Be careful not to remove | used for absolute value - only remove when surrounded by spaces or &
         result = result.replacingOccurrences(
@@ -145,6 +166,11 @@ class LatexImageRenderer {
         result = result.replacingOccurrences(of: "\\hdots", with: "\\cdots")
         result = result.replacingOccurrences(of: "\\dots", with: "\\cdots")
         result = result.replacingOccurrences(of: "\\ldots", with: "\\cdots")
+        
+        // Replace arrow commands that SwiftMath may not support
+        result = result.replacingOccurrences(of: "\\implies", with: "\\Rightarrow")
+        result = result.replacingOccurrences(of: "\\iff", with: "\\Leftrightarrow")
+        result = result.replacingOccurrences(of: "\\impliedby", with: "\\Leftarrow")
         
         // Clean up multiple spaces
         result = result.replacingOccurrences(

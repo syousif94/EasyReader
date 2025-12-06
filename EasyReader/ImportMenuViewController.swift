@@ -38,13 +38,10 @@ class ImportMenuViewController: UIViewController, UIDocumentPickerDelegate {
             documentPicker.modalPresentationStyle = .formSheet
             self.present(documentPicker, animated: true)
         }
-        let pasteAction = UIAction(title: "Paste", image: UIImage(systemName: "doc.on.clipboard")) { _ in
-            
+        let pasteAction = UIAction(title: "Paste", image: UIImage(systemName: "doc.on.clipboard")) { [weak self] _ in
+            self?.handlePaste()
         }
-        let urlAction = UIAction(title: "URL", image: UIImage(systemName: "link")) { _ in
-            
-        }
-        let menu = UIMenu(title: "", children: [urlAction, pasteAction, filePickerAction])
+        let menu = UIMenu(title: "", children: [pasteAction, filePickerAction])
         button.configuration = .glass()
         button.menu = menu
         button.showsMenuAsPrimaryAction = true
@@ -81,6 +78,57 @@ class ImportMenuViewController: UIViewController, UIDocumentPickerDelegate {
             // Optionally show a toast/alert that file already exists
         case .failed(let error):
             print("❌ [FilePicker] Failed: \(error.localizedDescription)")
+        }
+    }
+    
+    private func handlePaste() {
+        let pasteboard = UIPasteboard.general
+        
+        // Check for file data (PDF or EPUB)
+        if let pdfData = pasteboard.data(forPasteboardType: UTType.pdf.identifier) {
+            importData(pdfData, withExtension: "pdf")
+        } else if let epubData = pasteboard.data(forPasteboardType: UTType.epub.identifier) {
+            importData(epubData, withExtension: "epub")
+        } else if pasteboard.hasURLs, let url = pasteboard.urls?.first, url.isFileURL {
+            // Handle file URLs from pasteboard
+            let result = DocumentImporter.shared.importDocument(from: url)
+            handleImportResult(result)
+        } else {
+            // Show alert that no valid document found
+            let alert = UIAlertController(
+                title: "No Document Found",
+                message: "No PDF or EPUB document found in clipboard.",
+                preferredStyle: .alert
+            )
+            alert.addAction(UIAlertAction(title: "OK", style: .default))
+            present(alert, animated: true)
+        }
+    }
+    
+    private func importData(_ data: Data, withExtension ext: String) {
+        // Create a temporary file to import
+        let tempURL = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+            .appendingPathExtension(ext)
+        
+        do {
+            try data.write(to: tempURL)
+            let result = DocumentImporter.shared.importDocument(from: tempURL)
+            handleImportResult(result)
+            try? FileManager.default.removeItem(at: tempURL)
+        } catch {
+            print("❌ [Paste] Failed to write temp file: \(error.localizedDescription)")
+        }
+    }
+    
+    private func handleImportResult(_ result: DocumentImportResult) {
+        switch result {
+        case .imported(let destinationUrl):
+            print("✅ [Paste] Imported: \(destinationUrl.lastPathComponent)")
+        case .duplicate(let existingUrl):
+            print("📄 [Paste] Duplicate skipped: \(existingUrl.lastPathComponent)")
+        case .failed(let error):
+            print("❌ [Paste] Failed: \(error.localizedDescription)")
         }
     }
 }
