@@ -70,7 +70,7 @@ A modern iOS/macOS document reader app for PDFs and EPUBs with AI-powered analys
 
 ## TODO
 
-- [ ] **Follow-up Questions** - Add the ability to ask follow-up questions on AI analyses for deeper understanding
+- [-] **Follow-up Questions** - Add the ability to ask follow-up questions on AI analyses for deeper understanding
 - [ ] **Auto-open Bottom Sheet** - Automatically open the AI analysis bottom sheet when the first text response is returned
 - [ ] **Document Sorting** - Add sorting options for documents (by name, date added, date modified, etc.)
 - [ ] **Inline Document Transformation** - Use AI to transform documents for mobile-friendly inline reading
