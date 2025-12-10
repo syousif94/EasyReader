@@ -32,7 +32,6 @@ class AppViewModel: NSObject, DirectoryMonitorDelegate {
         let docType: String
     }
     
-    @MainActor
     private func loadCachedDocumentsIfAvailable() {
         guard let cacheURL = documentsCacheURL,
               let data = try? Data(contentsOf: cacheURL) else { return }
@@ -89,10 +88,9 @@ class AppViewModel: NSObject, DirectoryMonitorDelegate {
         }
         super.init()
         
-        // Load cached documents immediately for fast startup
-        Task { @MainActor in
-            self.loadCachedDocumentsIfAvailable()
-        }
+        // Load cached documents synchronously for fast offline startup
+        // This ensures documents are available immediately before async scan
+        loadCachedDocumentsIfAvailable()
         
         monitor?.delegate = self
         monitor?.startMonitoring()
@@ -104,7 +102,13 @@ class AppViewModel: NSObject, DirectoryMonitorDelegate {
     }
     
     private func scanDirectoryAsync() {
-        guard let directoryURL = Self.documentDirectory else { return }
+        guard let directoryURL = Self.documentDirectory else {
+            // No directory available - mark as loaded so cached documents can be shown
+            DispatchQueue.main.async { [weak self] in
+                self?.hasCompletedInitialLoad = true
+            }
+            return
+        }
         
         // Perform file enumeration off the main thread to avoid blocking startup
         DispatchQueue.global(qos: .userInitiated).async { [weak self] in
@@ -148,6 +152,11 @@ class AppViewModel: NSObject, DirectoryMonitorDelegate {
                 }
             } catch {
                 print("Error scanning directory: \(error)")
+                // Mark as loaded even on error so cached documents remain visible
+                // The app can work offline with previously cached document list
+                DispatchQueue.main.async { [weak self] in
+                    self?.hasCompletedInitialLoad = true
+                }
             }
         }
     }

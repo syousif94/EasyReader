@@ -121,4 +121,33 @@ extension AIAnalysisResult {
         formatter.unitsStyle = .abbreviated
         return formatter.localizedString(for: date, relativeTo: Date())
     }
+    
+    // MARK: - Chat History
+    
+    /// A single message in the chat history
+    struct ChatMessage: Codable {
+        let role: String  // "user" or "model"
+        let content: String
+    }
+    
+    /// Set the chat history
+    func setChatHistory(_ messages: [ChatMessage]) {
+        chatHistoryData = try? JSONEncoder().encode(messages)
+    }
+    
+    /// Get the chat history
+    func getChatHistory() -> [ChatMessage] {
+        guard let data = chatHistoryData,
+              let messages = try? JSONDecoder().decode([ChatMessage].self, from: data) else {
+            return []
+        }
+        return messages
+    }
+    
+    /// Append a message to the chat history
+    func appendToChatHistory(role: String, content: String) {
+        var history = getChatHistory()
+        history.append(ChatMessage(role: role, content: content))
+        setChatHistory(history)
+    }
 }

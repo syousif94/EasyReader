@@ -14,6 +14,7 @@ import FirebaseAI
 /// Notification posted when an AI analysis completes
 extension Notification.Name {
     static let aiAnalysisDidComplete = Notification.Name("aiAnalysisDidComplete")
+    static let didDeleteAIAnalysis = Notification.Name("didDeleteAIAnalysis")
 }
 
 /// Manages AI analysis requests, persistence, and notifications
@@ -117,8 +118,11 @@ LaTeX formatting rules:
             let ai = FirebaseAI.firebaseAI(backend: .googleAI())
             let model = ai.generativeModel(modelName: "gemini-2.5-flash-lite")
             
-            // Generate content stream
-            let contentStream = try model.generateContentStream(image, prompt)
+            // Start a chat session with the image and prompt
+            let chat = model.startChat()
+            
+            // Send the initial message with image
+            let contentStream = try chat.sendMessageStream(image, prompt)
             
             var fullResponse = ""
             
@@ -147,6 +151,12 @@ LaTeX formatting rules:
             analysis.status = "completed"
             analysis.completedAt = Date()
             analysis.response = fullResponse
+            
+            // Store the chat history (user prompt + model response)
+            analysis.setChatHistory([
+                AIAnalysisResult.ChatMessage(role: "user", content: prompt),
+                AIAnalysisResult.ChatMessage(role: "model", content: fullResponse)
+            ])
             
             try context.save()
             print("✅ [AIAnalysis] Analysis completed: \(analysis.id?.uuidString ?? "unknown")")
@@ -183,6 +193,63 @@ LaTeX formatting rules:
                     "error": error.localizedDescription
                 ]
             )
+        }
+    }
+    
+    // MARK: - Follow-up Questions
+    
+    /// Sends a follow-up question for an existing analysis
+    @MainActor
+    func sendFollowUp(
+        question: String,
+        analysis: AIAnalysisResult,
+        onChunk: @escaping (String) -> Void
+    ) async {
+        do {
+            // Initialize Firebase AI
+            let ai = FirebaseAI.firebaseAI(backend: .googleAI())
+            let model = ai.generativeModel(modelName: "gemini-2.5-flash-lite")
+            
+            // Build ModelContent history from stored chat history
+            var history: [ModelContent] = []
+            
+            // First message includes the image
+            let chatHistory = analysis.getChatHistory()
+            for (index, message) in chatHistory.enumerated() {
+                if index == 0, let imageData = analysis.imageData, let image = UIImage(data: imageData) {
+                    // First user message includes the image
+                    history.append(ModelContent(role: message.role, parts: image, message.content))
+                } else {
+                    history.append(ModelContent(role: message.role, parts: message.content))
+                }
+            }
+            
+            // Start chat with the conversation history
+            let chat = model.startChat(history: history)
+            
+            // Send the follow-up question using streaming
+            let contentStream = try chat.sendMessageStream(question)
+            
+            var fullFollowUpResponse = ""
+            
+            // Process the stream
+            for try await chunk in contentStream {
+                if let text = chunk.text {
+                    fullFollowUpResponse += text
+                    onChunk(text)
+                }
+            }
+            
+            // Append to the stored chat history
+            analysis.appendToChatHistory(role: "user", content: question)
+            analysis.appendToChatHistory(role: "model", content: fullFollowUpResponse)
+            
+            try context.save()
+            print("✅ [AIAnalysis] Follow-up completed")
+            
+        } catch {
+            print("❌ [AIAnalysis] Follow-up failed: \(error)")
+            onChunk("\n\n*Error: \(error.localizedDescription)*")
         }
     }
     

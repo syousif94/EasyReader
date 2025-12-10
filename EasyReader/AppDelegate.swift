@@ -96,6 +96,13 @@ class AppDelegate: UIResponder, UIApplicationDelegate {
     func application(_ application: UIApplication, configurationForConnecting connectingSceneSession: UISceneSession, options: UIScene.ConnectionOptions) -> UISceneConfiguration {
         // Called when a new scene session is being created.
         // Use this method to select a configuration to create the new scene with.
+        
+        // Check if this is an AI Analysis scene request
+        if let userActivity = options.userActivities.first,
+           userActivity.activityType == AIAnalysisActivity.activityType {
+            return UISceneConfiguration(name: "AI Analysis Configuration", sessionRole: connectingSceneSession.role)
+        }
+        
         return UISceneConfiguration(name: "Default Configuration", sessionRole: connectingSceneSession.role)
     }
 

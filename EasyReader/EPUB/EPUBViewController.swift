@@ -280,6 +280,24 @@ class EPUBViewController: UIViewController {
             name: .aiAnalysisDidComplete,
             object: nil
         )
+        
+        // Observe AI analysis deletion notifications (for Catalyst window delete)
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(aiAnalysisDidDelete(_:)),
+            name: .didDeleteAIAnalysis,
+            object: nil
+        )
+    }
+    
+    @objc private func aiAnalysisDidDelete(_ notification: Notification) {
+        guard let userInfo = notification.userInfo,
+              let analysisID = userInfo["analysisID"] as? UUID else { return }
+        
+        // Find and delete the analysis
+        if let analysis = AIAnalysisManager.shared.getAnalysis(byID: analysisID) {
+            deleteAnalysis(analysis)
+        }
     }
     
     @objc private func aiAnalysisDidComplete(_ notification: Notification) {
@@ -296,21 +314,30 @@ class EPUBViewController: UIViewController {
         
         guard currentAnalysis?.id == analysisID else { return }
         
+        // Find the correct analysis view controller (may be in a different scene on Catalyst)
+        let targetVC: AIAnalysisViewController? = {
+            #if targetEnvironment(macCatalyst)
+            return AIAnalysisSceneDelegate.findAnalysisViewController(for: analysisID) ?? aiAnalysisViewController
+            #else
+            return aiAnalysisViewController
+            #endif
+        }()
+        
         if isStreaming {
             // Stream new text to sheet
             if text.count > lastProcessedTextLength {
                 let newTextRange = text.index(text.startIndex, offsetBy: lastProcessedTextLength)..<text.endIndex
                 let newChunk = String(text[newTextRange])
-                aiAnalysisViewController?.appendText(newChunk)
-                aiAnalysisViewController?.setLoading(false)
+                targetVC?.appendText(newChunk)
+                targetVC?.setLoading(false)
                 lastProcessedTextLength = text.count
             }
         } else {
             // Final update when streaming completes
-            aiAnalysisViewController?.setLoading(false)
+            targetVC?.setLoading(false)
             
             if let error = userInfo["error"] as? String {
-                aiAnalysisViewController?.appendText("\n\nError: \(error)")
+                targetVC?.appendText("\n\nError: \(error)")
             }
         }
     }
@@ -554,37 +581,33 @@ class EPUBViewController: UIViewController {
         currentAnalysis = analysis
         lastProcessedTextLength = 0  // Reset for new analysis
         
-        let analysisVC = AIAnalysisViewController()
-        
-        if let image = analysis.getImage() {
-            analysisVC.setImage(image)
-        }
-        
-        analysisVC.onDelete = { [weak self] in
-            self?.deleteAnalysis(analysis)
-        }
-        
-        if analysis.isCompleted {
-            analysisVC.setLoading(false)
-            analysisVC.setText(analysis.response ?? "")
-            if let timestamp = analysis.formattedCompletedDate {
-                analysisVC.setTimestamp("Analyzed \(timestamp)")
+        let analysisVC = presentAIAnalysis(
+            analysis: analysis,
+            image: analysis.getImage(),
+            isNewAnalysis: false,
+            onDelete: { [weak self] in
+                self?.deleteAnalysis(analysis)
+            },
+            configure: { [weak self] vc in
+                if analysis.isCompleted {
+                    vc.setLoading(false)
+                    vc.loadChatHistory(from: analysis)
+                    if let timestamp = analysis.formattedCompletedDate {
+                        vc.setTimestamp("Analyzed \(timestamp)")
+                    }
+                } else if analysis.isPending {
+                    vc.setLoading(true)
+                    if let response = analysis.response, !response.isEmpty {
+                        vc.setText(response)
+                        self?.lastProcessedTextLength = response.count
+                    }
+                } else if analysis.isFailed {
+                    vc.setLoading(false)
+                    vc.setText("Analysis failed: \(analysis.errorMessage ?? "Unknown error")")
+                }
             }
-        } else if analysis.isPending {
-            analysisVC.setLoading(true)
-            if let response = analysis.response, !response.isEmpty {
-                analysisVC.setText(response)
-                lastProcessedTextLength = response.count
-            }
-        } else if analysis.isFailed {
-            analysisVC.setLoading(false)
-            analysisVC.setText("Analysis failed: \(analysis.errorMessage ?? "Unknown error")")
-        }
+        )
         
-        let nav = UINavigationController(rootViewController: analysisVC)
-        nav.modalPresentationStyle = .pageSheet
-        
-        present(nav, animated: true)
         aiAnalysisViewController = analysisVC
     }
     
@@ -672,6 +695,14 @@ class EPUBViewController: UIViewController {
             
             if let analysis = analysis {
                 currentAnalysis = analysis
+                
+                // Update the scene's view controller with the analysis (for Catalyst)
+                #if targetEnvironment(macCatalyst)
+                if let sceneVC = AIAnalysisSceneDelegate.findPendingAnalysisViewController() {
+                    sceneVC.currentAnalysis = analysis
+                }
+                #endif
+                aiAnalysisViewController?.currentAnalysis = analysis
                 
                 // Show indicator with the same image stored in the analysis
                 if let imageData = analysis.imageData, let image = UIImage(data: imageData) {

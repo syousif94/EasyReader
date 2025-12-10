@@ -4,6 +4,7 @@
         <attribute name="annotationBoundsData" optional="YES" attributeType="Binary"/>
         <attribute name="annotationColor" optional="YES" attributeType="Binary"/>
         <attribute name="annotationPathData" optional="YES" attributeType="Binary"/>
+        <attribute name="chatHistoryData" optional="YES" attributeType="Binary"/>
         <attribute name="completedAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
         <attribute name="createdAt" optional="YES" attributeType="Date" usesScalarValueType="NO"/>
         <attribute name="documentFileHash" optional="YES" attributeType="String"/>
