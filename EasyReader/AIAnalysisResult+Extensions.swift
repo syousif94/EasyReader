@@ -128,6 +128,13 @@ extension AIAnalysisResult {
     struct ChatMessage: Codable {
         let role: String  // "user" or "model"
         let content: String
+        var imageID: UUID?  // Reference to AIFollowUpImage entity (for follow-up images)
+        
+        init(role: String, content: String, imageID: UUID? = nil) {
+            self.role = role
+            self.content = content
+            self.imageID = imageID
+        }
     }
     
     /// Set the chat history
@@ -149,5 +156,43 @@ extension AIAnalysisResult {
         var history = getChatHistory()
         history.append(ChatMessage(role: role, content: content))
         setChatHistory(history)
+    }
+    
+    /// Append a message with an image to the chat history
+    /// The image is stored as a separate AIFollowUpImage entity
+    func appendToChatHistory(role: String, content: String, image: UIImage) {
+        guard let analysisID = self.id else {
+            print("❌ [AIAnalysisResult] Cannot add image without analysis ID")
+            appendToChatHistory(role: role, content: content)
+            return
+        }
+        
+        let context = self.managedObjectContext ?? AppDelegate.getManagedContext()
+        
+        // Create the follow-up image entity
+        guard let followUpImage = AIFollowUpImage.create(image: image, analysisID: analysisID, context: context) else {
+            print("❌ [AIAnalysisResult] Failed to create follow-up image")
+            appendToChatHistory(role: role, content: content)
+            return
+        }
+        
+        var history = getChatHistory()
+        history.append(ChatMessage(role: role, content: content, imageID: followUpImage.id))
+        setChatHistory(history)
+        
+        // Save the context to persist the chat history with the imageID reference
+        do {
+            try context.save()
+            print("✅ [AIAnalysisResult] Saved chat history with image ID: \(followUpImage.id?.uuidString ?? "unknown")")
+        } catch {
+            print("❌ [AIAnalysisResult] Failed to save chat history: \(error)")
+        }
+    }
+    
+    /// Get the image for a chat message (fetches from AIFollowUpImage)
+    func getFollowUpImage(for message: ChatMessage) -> UIImage? {
+        guard let imageID = message.imageID else { return nil }
+        let context = self.managedObjectContext ?? AppDelegate.getManagedContext()
+        return AIFollowUpImage.fetch(byID: imageID, context: context)?.getImage()
     }
 }

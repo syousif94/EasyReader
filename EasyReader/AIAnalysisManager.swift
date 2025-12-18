@@ -198,10 +198,13 @@ LaTeX formatting rules:
     
     // MARK: - Follow-up Questions
     
-    /// Sends a follow-up question for an existing analysis
+    /// Sends a follow-up question for an existing analysis (with optional image)
+    /// Note: The caller should add the user message to chat history BEFORE calling this method
+    /// This method will only append the AI's response to the chat history
     @MainActor
     func sendFollowUp(
         question: String,
+        image: UIImage? = nil,
         analysis: AIAnalysisResult,
         onChunk: @escaping (String) -> Void
     ) async {
@@ -211,24 +214,34 @@ LaTeX formatting rules:
             let model = ai.generativeModel(modelName: "gemini-2.5-flash-lite")
             
             // Build ModelContent history from stored chat history
+            // EXCLUDE the last user message since we'll send it as the new message
             var history: [ModelContent] = []
             
-            // First message includes the image
             let chatHistory = analysis.getChatHistory()
-            for (index, message) in chatHistory.enumerated() {
-                if index == 0, let imageData = analysis.imageData, let image = UIImage(data: imageData) {
-                    // First user message includes the image
-                    history.append(ModelContent(role: message.role, parts: image, message.content))
+            let historyWithoutLast = chatHistory.dropLast() // Remove the message we just added
+            
+            for (index, message) in historyWithoutLast.enumerated() {
+                if index == 0, let imageData = analysis.imageData, let originalImage = UIImage(data: imageData) {
+                    // First user message includes the original image
+                    history.append(ModelContent(role: message.role, parts: originalImage, message.content))
+                } else if let messageImage = analysis.getFollowUpImage(for: message) {
+                    // Message has an attached follow-up image
+                    history.append(ModelContent(role: message.role, parts: messageImage, message.content))
                 } else {
                     history.append(ModelContent(role: message.role, parts: message.content))
                 }
             }
             
-            // Start chat with the conversation history
+            // Start chat with the conversation history (excluding the new user message)
             let chat = model.startChat(history: history)
             
-            // Send the follow-up question using streaming
-            let contentStream = try chat.sendMessageStream(question)
+            // Send the new user message (with or without image)
+            let contentStream: AsyncThrowingStream<GenerateContentResponse, Error>
+            if let followUpImage = image {
+                contentStream = try chat.sendMessageStream(followUpImage, question)
+            } else {
+                contentStream = try chat.sendMessageStream(question)
+            }
             
             var fullFollowUpResponse = ""
             
@@ -240,8 +253,7 @@ LaTeX formatting rules:
                 }
             }
             
-            // Append to the stored chat history
-            analysis.appendToChatHistory(role: "user", content: question)
+            // Append only the AI response to the stored chat history
             analysis.appendToChatHistory(role: "model", content: fullFollowUpResponse)
             
             try context.save()
@@ -249,6 +261,79 @@ LaTeX formatting rules:
             
         } catch {
             print("❌ [AIAnalysis] Follow-up failed: \(error)")
+            onChunk("\n\n*Error: \(error.localizedDescription)*")
+        }
+    }
+    
+    // MARK: - Retry Analysis
+    
+    /// Retries a failed or completed analysis
+    @MainActor
+    func retryAnalysis(
+        _ analysis: AIAnalysisResult,
+        onChunk: @escaping (String) -> Void
+    ) async {
+        guard let imageData = analysis.imageData,
+              let image = UIImage(data: imageData) else {
+            print("❌ [AIAnalysis] Cannot retry: no image data")
+            onChunk("Error: No image data available for retry")
+            return
+        }
+        
+        // Reset the analysis state
+        analysis.status = "processing"
+        analysis.response = nil
+        analysis.errorMessage = nil
+        analysis.completedAt = nil
+        analysis.chatHistoryData = nil
+        
+        try? context.save()
+        
+        let prompt = analysis.prompt ?? defaultPrompt
+        
+        do {
+            // Initialize Firebase AI
+            let ai = FirebaseAI.firebaseAI(backend: .googleAI())
+            let model = ai.generativeModel(modelName: "gemini-2.5-flash-lite")
+            
+            // Start a new chat session with the image and prompt
+            let chat = model.startChat()
+            let contentStream = try chat.sendMessageStream(image, prompt)
+            
+            var fullResponse = ""
+            
+            // Process the stream
+            for try await chunk in contentStream {
+                if let text = chunk.text {
+                    fullResponse += text
+                    
+                    // Update the response incrementally
+                    analysis.response = fullResponse
+                    onChunk(text)
+                }
+            }
+            
+            // Mark as completed
+            analysis.status = "completed"
+            analysis.completedAt = Date()
+            analysis.response = fullResponse
+            
+            // Store the chat history
+            analysis.setChatHistory([
+                AIAnalysisResult.ChatMessage(role: "user", content: prompt),
+                AIAnalysisResult.ChatMessage(role: "model", content: fullResponse)
+            ])
+            
+            try context.save()
+            print("✅ [AIAnalysis] Retry completed: \(analysis.id?.uuidString ?? "unknown")")
+            
+        } catch {
+            print("❌ [AIAnalysis] Retry failed: \(error)")
+            analysis.status = "failed"
+            analysis.errorMessage = error.localizedDescription
+            analysis.completedAt = Date()
+            
+            try? context.save()
             onChunk("\n\n*Error: \(error.localizedDescription)*")
         }
     }
@@ -370,8 +455,13 @@ LaTeX formatting rules:
     
     // MARK: - Delete Methods
     
-    /// Delete a specific analysis
+    /// Delete a specific analysis and its follow-up images
     func deleteAnalysis(_ analysis: AIAnalysisResult) {
+        // Delete all follow-up images first
+        if let analysisID = analysis.id {
+            AIFollowUpImage.deleteAll(forAnalysisID: analysisID, context: context)
+        }
+        
         context.delete(analysis)
         
         do {
@@ -386,6 +476,10 @@ LaTeX formatting rules:
     func deleteAnalyses(forDocumentHash documentHash: String) {
         let analyses = getAnalyses(forDocumentHash: documentHash)
         for analysis in analyses {
+            // Delete follow-up images for each analysis
+            if let analysisID = analysis.id {
+                AIFollowUpImage.deleteAll(forAnalysisID: analysisID, context: context)
+            }
             context.delete(analysis)
         }
         

@@ -174,38 +174,5 @@ class AppViewModel: NSObject, DirectoryMonitorDelegate {
     func getThumbnailCacheSize() async -> Int64 {
         return await ThumbnailCache.shared.getCacheSize()
     }
-    
-    // MARK: - AI Analysis
-    
-    @MainActor
-    func analyzeImage(_ image: UIImage, prompt: String = "Explain this to me. Use LaTeX if necessary.") async {
-        guard !isAnalyzingWithAI else { return }
-        
-        isAnalyzingWithAI = true
-        aiAnalysisText = ""
-        
-        do {
-            // Initialize Firebase AI
-            let ai = FirebaseAI.firebaseAI(backend: .googleAI())
-            let model = ai.generativeModel(modelName: "gemini-2.5-flash")
-            
-            // Generate content stream
-            let contentStream = try model.generateContentStream(image, prompt)
-            
-            // Process the stream
-            for try await chunk in contentStream {
-                if let text = chunk.text {
-                    aiAnalysisText += text
-                }
-            }
-            
-        } catch {
-            aiAnalysisText = "Error analyzing image: \(error.localizedDescription)"
-        }
-        
-        print(aiAnalysisText)
-        
-        isAnalyzingWithAI = false
-    }
 
 }

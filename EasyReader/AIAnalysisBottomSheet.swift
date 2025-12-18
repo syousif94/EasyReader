@@ -7,6 +7,7 @@
 
 import UIKit
 import Down
+import PinLayout
 
 // MARK: - Chat Message Bubble View
 
@@ -178,6 +179,348 @@ class ChatMessageBubbleView: UIView {
     }
 }
 
+// MARK: - Chat Image Message View
+
+/// View for displaying images in the chat (for follow-up image attachments)
+class ChatImageMessageView: UIView {
+    
+    private let imageContainerView: UIView = {
+        let view = UIView()
+        view.backgroundColor = .clear
+        view.layer.shadowColor = UIColor.black.cgColor
+        view.layer.shadowOffset = CGSize(width: 0, height: 2)
+        view.layer.shadowRadius = 4
+        view.layer.shadowOpacity = 0.15
+        view.translatesAutoresizingMaskIntoConstraints = false
+        return view
+    }()
+    
+    private let imageView: UIImageView = {
+        let iv = UIImageView()
+        iv.contentMode = .scaleAspectFill
+        iv.clipsToBounds = true
+        iv.layer.cornerRadius = 12
+        iv.layer.cornerCurve = .continuous
+        iv.backgroundColor = .secondarySystemBackground
+        iv.translatesAutoresizingMaskIntoConstraints = false
+        return iv
+    }()
+    
+    private var imageWidthConstraint: NSLayoutConstraint?
+    private var imageHeightConstraint: NSLayoutConstraint?
+    
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        setupView()
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
+    private func setupView() {
+        translatesAutoresizingMaskIntoConstraints = false
+        
+        addSubview(imageContainerView)
+        imageContainerView.addSubview(imageView)
+        
+        // Container is right-aligned (user messages)
+        NSLayoutConstraint.activate([
+            imageContainerView.topAnchor.constraint(equalTo: topAnchor),
+            imageContainerView.bottomAnchor.constraint(equalTo: bottomAnchor),
+            imageContainerView.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+            imageContainerView.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 60),
+        ])
+        
+        // Image view fills container
+        NSLayoutConstraint.activate([
+            imageView.topAnchor.constraint(equalTo: imageContainerView.topAnchor),
+            imageView.leadingAnchor.constraint(equalTo: imageContainerView.leadingAnchor),
+            imageView.trailingAnchor.constraint(equalTo: imageContainerView.trailingAnchor),
+            imageView.bottomAnchor.constraint(equalTo: imageContainerView.bottomAnchor),
+        ])
+        
+        // Default size constraints (will be updated based on image)
+        imageWidthConstraint = imageView.widthAnchor.constraint(equalToConstant: 200)
+        imageHeightConstraint = imageView.heightAnchor.constraint(equalToConstant: 150)
+        imageWidthConstraint?.isActive = true
+        imageHeightConstraint?.isActive = true
+    }
+    
+    func setImage(_ image: UIImage, maxWidth: CGFloat = 250, maxHeight: CGFloat = 300) {
+        imageView.image = image
+        
+        // Calculate size maintaining aspect ratio
+        let aspectRatio = image.size.width / image.size.height
+        var width: CGFloat
+        var height: CGFloat
+        
+        if aspectRatio > 1 {
+            // Landscape: constrain by width
+            width = min(image.size.width, maxWidth)
+            height = width / aspectRatio
+            if height > maxHeight {
+                height = maxHeight
+                width = height * aspectRatio
+            }
+        } else {
+            // Portrait: constrain by height
+            height = min(image.size.height, maxHeight)
+            width = height * aspectRatio
+            if width > maxWidth {
+                width = maxWidth
+                height = width / aspectRatio
+            }
+        }
+        
+        imageWidthConstraint?.constant = width
+        imageHeightConstraint?.constant = height
+        
+        // Update shadow path
+        imageContainerView.layer.shadowPath = UIBezierPath(
+            roundedRect: CGRect(origin: .zero, size: CGSize(width: width, height: height)),
+            cornerRadius: 12
+        ).cgPath
+    }
+}
+
+// MARK: - AIAnalysisDrawingOverlay
+
+/// Transparent overlay view for drawing annotations on AI analysis images
+class AIAnalysisDrawingOverlay: UIView {
+    
+    // MARK: - Properties
+    
+    /// Whether drawing is currently enabled
+    var isDrawingEnabled: Bool = false {
+        didSet {
+            gestureRecognizer?.isEnabled = isDrawingEnabled
+        }
+    }
+    
+    // MARK: - Hit Testing (Passthrough when not drawing)
+    
+    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
+        // When drawing is disabled, pass through all touches
+        guard isDrawingEnabled else {
+            return nil
+        }
+        return super.hitTest(point, with: event)
+    }
+    
+    /// Delegate for drawing events
+    weak var drawingDelegate: AIAnalysisDrawingDelegate?
+    
+    /// Current drawing path
+    private var currentPath: UIBezierPath?
+    
+    /// All completed annotation paths
+    private var annotations: [(path: UIBezierPath, color: UIColor, bounds: CGRect)] = []
+    
+    /// Drawing gesture recognizer
+    private var gestureRecognizer: DrawingGestureRecognizer?
+    
+    /// Drawing color
+    static let drawingColor = UIColor.systemBlue
+    
+    /// Line width
+    private let lineWidth: CGFloat = 3.0
+    
+    // MARK: - Initialization
+    
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        setupView()
+    }
+    
+    required init?(coder: NSCoder) {
+        super.init(coder: coder)
+        setupView()
+    }
+    
+    private func setupView() {
+        backgroundColor = .clear
+        isUserInteractionEnabled = true
+        setupGestureRecognizer()
+    }
+    
+    private func setupGestureRecognizer() {
+        let recognizer = DrawingGestureRecognizer()
+        recognizer.drawingDelegate = self
+        recognizer.isEnabled = false
+        addGestureRecognizer(recognizer)
+        gestureRecognizer = recognizer
+    }
+    
+    // MARK: - Drawing
+    
+    override func draw(_ rect: CGRect) {
+        super.draw(rect)
+        
+        // Draw completed annotations
+        for annotation in annotations {
+            annotation.color.withAlphaComponent(0.6).setStroke()
+            let path = annotation.path
+            path.lineWidth = lineWidth
+            path.lineCapStyle = .round
+            path.lineJoinStyle = .round
+            path.stroke()
+        }
+        
+        // Draw current path being drawn
+        if let path = currentPath {
+            Self.drawingColor.withAlphaComponent(0.6).setStroke()
+            path.lineWidth = lineWidth
+            path.lineCapStyle = .round
+            path.lineJoinStyle = .round
+            path.stroke()
+        }
+    }
+    
+    // MARK: - Public Methods
+    
+    /// Clear all annotations
+    func clearAnnotations() {
+        annotations.removeAll()
+        currentPath = nil
+        setNeedsDisplay()
+        drawingDelegate?.drawingOverlayDidChange(hasAnnotations: false)
+    }
+    
+    /// Undo the last annotation
+    @discardableResult
+    func undoLastAnnotation() -> Bool {
+        guard !annotations.isEmpty else { return false }
+        annotations.removeLast()
+        setNeedsDisplay()
+        drawingDelegate?.drawingOverlayDidChange(hasAnnotations: !annotations.isEmpty)
+        return true
+    }
+    
+    /// Check if there are annotations that can be undone
+    var canUndo: Bool {
+        return !annotations.isEmpty
+    }
+    
+    /// Check if there are any annotations
+    var hasAnnotations: Bool {
+        return !annotations.isEmpty
+    }
+    
+    /// Number of annotations
+    var annotationCount: Int {
+        return annotations.count
+    }
+    
+    /// Get the bounds of all current annotations
+    var annotationsBounds: CGRect? {
+        guard !annotations.isEmpty else { return nil }
+        
+        var combinedBounds = annotations[0].bounds
+        for annotation in annotations.dropFirst() {
+            combinedBounds = combinedBounds.union(annotation.bounds)
+        }
+        return combinedBounds
+    }
+    
+    /// Get all annotation paths (for capturing)
+    var annotationPaths: [UIBezierPath] {
+        return annotations.map { $0.path }
+    }
+    
+    /// Capture a snapshot of a specific region (including drawing annotations)
+    /// This should be called on the parent view that contains both content and this overlay
+    func captureSnapshot(in rect: CGRect, from parentView: UIView) -> UIImage? {
+        // Clamp rect to parent bounds
+        let clampedRect = rect.intersection(parentView.bounds)
+        guard !clampedRect.isEmpty else { return nil }
+        
+        // Create renderer for the clamped region
+        let renderer = UIGraphicsImageRenderer(size: clampedRect.size)
+        let image = renderer.image { context in
+            // Translate to capture only the specified region
+            context.cgContext.translateBy(x: -clampedRect.origin.x, y: -clampedRect.origin.y)
+            parentView.drawHierarchy(in: parentView.bounds, afterScreenUpdates: true)
+        }
+        
+        return image
+    }
+    
+    /// Capture the annotated area with padding (like EPUB does)
+    func captureAnnotatedArea(from parentView: UIView, padding: CGFloat = 20) -> UIImage? {
+        guard let bounds = annotationsBounds else { return nil }
+        
+        // Expand bounds with padding
+        let expandedBounds = bounds.insetBy(dx: -padding, dy: -padding)
+        
+        return captureSnapshot(in: expandedBounds, from: parentView)
+    }
+    
+    /// Clear all paths (alias for clearAnnotations)
+    func clearAllPaths() {
+        clearAnnotations()
+    }
+    
+    /// Undo the last path (alias for undoLastAnnotation)
+    func undoLastPath() {
+        undoLastAnnotation()
+    }
+    
+    /// Whether there are drawings
+    var hasDrawings: Bool {
+        return hasAnnotations
+    }
+}
+
+// MARK: - DrawingGestureRecognizerDelegate
+
+extension AIAnalysisDrawingOverlay: DrawingGestureRecognizerDelegate {
+    
+    func gestureRecognizerBegan(_ location: CGPoint) {
+        currentPath = UIBezierPath()
+        currentPath?.move(to: location)
+        setNeedsDisplay()
+    }
+    
+    func gestureRecognizerMoved(_ location: CGPoint) {
+        currentPath?.addLine(to: location)
+        currentPath?.move(to: location)
+        setNeedsDisplay()
+    }
+    
+    func gestureRecognizerEnded(_ location: CGPoint) {
+        guard let path = currentPath else { return }
+        
+        path.addLine(to: location)
+        
+        // Calculate bounds with some padding
+        let bounds = path.bounds.insetBy(dx: -5, dy: -5)
+        
+        annotations.append((
+            path: path,
+            color: Self.drawingColor,
+            bounds: bounds
+        ))
+        
+        currentPath = nil
+        setNeedsDisplay()
+        
+        // Notify delegate
+        drawingDelegate?.drawingOverlayDidChange(hasAnnotations: true)
+        drawingDelegate?.drawingOverlayDidCompleteStroke()
+    }
+}
+
+// MARK: - AIAnalysisDrawingDelegate
+
+protocol AIAnalysisDrawingDelegate: AnyObject {
+    /// Called when annotations change (added, undone, or cleared)
+    func drawingOverlayDidChange(hasAnnotations: Bool)
+    
+    /// Called when a stroke is completed
+    func drawingOverlayDidCompleteStroke()
+}
+
 // MARK: - AIAnalysisViewController
 
 class AIAnalysisViewController: UIViewController {
@@ -193,6 +536,7 @@ class AIAnalysisViewController: UIViewController {
     
     // Track message views
     private var messageBubbles: [ChatMessageBubbleView] = []
+    private var imageMessageViews: [ChatImageMessageView] = []
     
     // Currently streaming bubble
     private var streamingBubble: ChatMessageBubbleView?
@@ -314,6 +658,105 @@ class AIAnalysisViewController: UIViewController {
         return button
     }()
     
+    // Bottom toolbar with drawing controls + action buttons (like PDFViewController)
+    private let bottomToolbar: UIToolbar = {
+        let toolbar = UIToolbar()
+        // Don't set translatesAutoresizingMaskIntoConstraints - using PinLayout
+        return toolbar
+    }()
+    
+    // Bar button items for drawing (like PDFViewController)
+    private lazy var drawingToggleBarButton: UIBarButtonItem = {
+        let button = UIBarButtonItem(
+            image: UIImage(systemName: "scribble"),
+            style: .plain,
+            target: self,
+            action: #selector(toggleDrawingMode)
+        )
+        return button
+    }()
+    
+    private lazy var undoBarButton: UIBarButtonItem = {
+        let button = UIBarButtonItem(
+            image: UIImage(systemName: "arrow.uturn.backward"),
+            style: .plain,
+            target: self,
+            action: #selector(undoLastDrawing)
+        )
+        return button
+    }()
+    
+    private lazy var clearAllBarButton: UIBarButtonItem = {
+        let button = UIBarButtonItem(
+            image: UIImage(systemName: "xmark.circle.fill"),
+            style: .plain,
+            target: self,
+            action: #selector(clearAllDrawing)
+        )
+        return button
+    }()
+    
+    // Action bar button items
+    private lazy var deleteBarButton: UIBarButtonItem = {
+        let button = UIBarButtonItem(
+            image: UIImage(systemName: "trash"),
+            style: .plain,
+            target: self,
+            action: #selector(confirmDelete)
+        )
+        button.tintColor = .systemRed
+        return button
+    }()
+    
+    private lazy var retryBarButton: UIBarButtonItem = {
+        let button = UIBarButtonItem(
+            image: UIImage(systemName: "arrow.clockwise"),
+            style: .plain,
+            target: self,
+            action: #selector(retryAnalysis)
+        )
+        return button
+    }()
+    
+    private lazy var closeBarButton: UIBarButtonItem = {
+        let button = UIBarButtonItem(
+            image: UIImage(systemName: "xmark"),
+            style: .plain,
+            target: self,
+            action: #selector(closeTapped)
+        )
+        return button
+    }()
+    
+    // AI Analysis button (like PDFViewController's Explain button)
+    private let aiAnalysisButton: UIButton = {
+        let button = UIButton()
+        button.configuration = .prominentGlass()
+        button.configuration?.imagePadding = 10
+        button.setTitle("Explain", for: .normal)
+        button.backgroundColor = .systemBlue
+        button.setImage(UIImage(systemName: "brain"), for: .normal)
+        button.alpha = 0 // Initially hidden
+        return button
+    }()
+    
+    // Drawing overlay for annotating the scroll view content
+    private let drawingOverlay: AIAnalysisDrawingOverlay = {
+        let overlay = AIAnalysisDrawingOverlay()
+        overlay.translatesAutoresizingMaskIntoConstraints = false
+        return overlay
+    }()
+    
+    // Track drawing state
+    private var isDrawingEnabled = false {
+        didSet {
+            drawingOverlay.isDrawingEnabled = isDrawingEnabled
+            scrollView.isScrollEnabled = !isDrawingEnabled // Disable scrolling while drawing
+            updateBottomToolbarItems()
+            view.setNeedsLayout()
+        }
+    }
+    
     // Track if currently generating
     private var isGenerating: Bool = false
     
@@ -322,6 +765,9 @@ class AIAnalysisViewController: UIViewController {
     
     // Scroll view bottom constraint for keyboard
     private var scrollViewBottomConstraint: NSLayoutConstraint?
+    
+    // Drawing overlay height constraint (matches scroll view content size)
+    private var drawingOverlayHeightConstraint: NSLayoutConstraint?
     
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -338,31 +784,21 @@ class AIAnalysisViewController: UIViewController {
         // Set up title image view with shadow container
         setupTitleImageView()
         
-        // Add delete button on the left
-        let deleteButton = UIBarButtonItem(
-            image: UIImage(systemName: "trash"),
-            primaryAction: UIAction { [weak self] _ in
-                self?.confirmDelete()
-            }
-        )
-        deleteButton.tintColor = .systemRed
-        navigationItem.leftBarButtonItem = deleteButton
+        // Add tap gesture to title image for expanding
+        let tapGesture = UITapGestureRecognizer(target: self, action: #selector(titleImageTapped))
+        titleContainerView.addGestureRecognizer(tapGesture)
+        titleContainerView.isUserInteractionEnabled = true
         
-        // Only show close button on iOS (Catalyst has window close button)
-        #if !targetEnvironment(macCatalyst)
-        let closeButton = UIBarButtonItem(
-            systemItem: .close,
-            primaryAction: UIAction { [weak self] _ in
-                self?.dismiss(animated: true)
-            }
-        )
-        navigationItem.rightBarButtonItems = [closeButton]
-        #endif
-        
-        // Setup scroll view
+        // Setup scroll view with drawing overlay on top
         view.addSubview(scrollView)
+        view.addSubview(bottomToolbar)
+        view.addSubview(aiAnalysisButton)
         scrollView.addSubview(timestampLabel)
         scrollView.addSubview(messagesStackView)
+        scrollView.addSubview(drawingOverlay) // Drawing overlay on top of content
+        
+        // Setup drawing overlay delegate
+        drawingOverlay.drawingDelegate = self
         
         // Setup input area inside scroll view (added to stack view later)
         inputContainerView.addSubview(inputTextView)
@@ -373,15 +809,18 @@ class AIAnalysisViewController: UIViewController {
         inputTextView.delegate = self
         sendButton.addTarget(self, action: #selector(sendButtonTapped), for: .touchUpInside)
         
+        // Configure AI analysis button
+        aiAnalysisButton.addTarget(self, action: #selector(addDrawingToChat), for: .touchUpInside)
+        
         // Set up keyboard observers
         NotificationCenter.default.addObserver(self, selector: #selector(keyboardWillShow(_:)), name: UIResponder.keyboardWillShowNotification, object: nil)
         NotificationCenter.default.addObserver(self, selector: #selector(keyboardWillHide(_:)), name: UIResponder.keyboardWillHideNotification, object: nil)
         
-        // Layout constraints
+        // Layout constraints - scroll view extends to bottom of screen, toolbar floats over it (like PDFViewController)
         scrollViewBottomConstraint = scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor)
         
         NSLayoutConstraint.activate([
-            // Scroll view takes full height
+            // Scroll view takes full height to bottom of screen (toolbar floats over it like PDFViewController)
             scrollView.topAnchor.constraint(equalTo: view.topAnchor),
             scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
             scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
@@ -397,8 +836,14 @@ class AIAnalysisViewController: UIViewController {
             messagesStackView.topAnchor.constraint(equalTo: timestampLabel.bottomAnchor, constant: 16),
             messagesStackView.leadingAnchor.constraint(equalTo: scrollView.leadingAnchor),
             messagesStackView.trailingAnchor.constraint(equalTo: scrollView.trailingAnchor),
-            messagesStackView.bottomAnchor.constraint(equalTo: scrollView.bottomAnchor, constant: -20),
+            messagesStackView.bottomAnchor.constraint(equalTo: scrollView.bottomAnchor, constant: -70), // Extra padding for floating toolbar
             messagesStackView.widthAnchor.constraint(equalTo: scrollView.widthAnchor),
+            
+            // Drawing overlay covers the entire scroll view content
+            drawingOverlay.topAnchor.constraint(equalTo: scrollView.topAnchor),
+            drawingOverlay.leadingAnchor.constraint(equalTo: scrollView.leadingAnchor),
+            drawingOverlay.trailingAnchor.constraint(equalTo: scrollView.trailingAnchor),
+            drawingOverlay.widthAnchor.constraint(equalTo: scrollView.widthAnchor),
             
             // Input container constraints
             inputContainerView.heightAnchor.constraint(greaterThanOrEqualToConstant: 52),
@@ -423,6 +868,254 @@ class AIAnalysisViewController: UIViewController {
         // Set up input text view height constraint
         inputTextViewHeightConstraint = inputTextView.heightAnchor.constraint(equalToConstant: 40)
         inputTextViewHeightConstraint?.isActive = true
+        
+        // Set up drawing overlay height constraint (will be updated in viewDidLayoutSubviews)
+        drawingOverlayHeightConstraint = drawingOverlay.heightAnchor.constraint(equalToConstant: 1000)
+        drawingOverlayHeightConstraint?.isActive = true
+        
+        // Setup bottom toolbar items
+        updateBottomToolbarItems()
+    }
+    
+    // MARK: - Layout (PinLayout like PDFViewController)
+    
+    override func viewDidLayoutSubviews() {
+        super.viewDidLayoutSubviews()
+        
+        // Update drawing overlay height to match scroll view content
+        let contentHeight = max(scrollView.contentSize.height, scrollView.bounds.height)
+        drawingOverlayHeightConstraint?.constant = contentHeight
+        
+        let insets = view.safeAreaInsets
+        let bottomInset = insets.bottom
+        
+        // Layout the bottom toolbar using PinLayout (like PDFViewController)
+        layoutBottomToolbar(bottomInset: bottomInset)
+        
+        // Position AI analysis button above the toolbar when there are drawings
+        aiAnalysisButton.pin
+            .height(54)
+            .width(180)
+            .bottom(to: bottomToolbar.edge.top).marginBottom(16)
+            .right(20)
+    }
+    
+    private func layoutBottomToolbar(bottomInset: CGFloat) {
+        let toolbarHeight: CGFloat = 44
+        
+        // Resize toolbar to fit its content
+        bottomToolbar.sizeToFit()
+        
+        // Position toolbar on the right side, at bottom (like PDFViewController)
+        bottomToolbar.pin
+            .height(toolbarHeight)
+            .right(16)
+            .left(16)
+            .bottom(bottomInset)
+    }
+    
+    // MARK: - Bottom Toolbar
+    
+    private func updateBottomToolbarItems() {
+        var items: [UIBarButtonItem] = []
+        let flexibleSpace = UIBarButtonItem(barButtonSystemItem: .flexibleSpace, target: nil, action: nil)
+        
+        if isDrawingEnabled {
+            // Drawing mode: show undo, clear, and drawing toggle (like PDFViewController)
+            let hasDrawings = drawingOverlay.hasDrawings
+            undoBarButton.isEnabled = hasDrawings
+            undoBarButton.tintColor = hasDrawings ? .label : .secondaryLabel
+            clearAllBarButton.isEnabled = hasDrawings
+            clearAllBarButton.tintColor = hasDrawings ? .secondaryLabel : .tertiaryLabel
+            drawingToggleBarButton.tintColor = .systemBlue // Blue when active
+            
+            items = [
+                flexibleSpace,
+                undoBarButton,
+                clearAllBarButton,
+                drawingToggleBarButton,
+            ]
+        } else {
+            // Normal mode: show action buttons + drawing toggle
+            retryBarButton.isEnabled = currentAnalysis?.isCompleted == true || currentAnalysis?.isFailed == true
+            drawingToggleBarButton.tintColor = .label // Normal color when inactive
+            
+            #if targetEnvironment(macCatalyst)
+            // Catalyst: delete, retry, drawing toggle (no close - window has close button)
+            items = [
+                deleteBarButton,
+                flexibleSpace,
+                retryBarButton,
+                flexibleSpace,
+                drawingToggleBarButton,
+            ]
+            #else
+            // iOS: delete, retry, drawing toggle, close
+            items = [
+                deleteBarButton,
+                flexibleSpace,
+                retryBarButton,
+                flexibleSpace,
+                drawingToggleBarButton,
+                flexibleSpace,
+                closeBarButton,
+            ]
+            #endif
+        }
+        
+        bottomToolbar.setItems(items, animated: true)
+    }
+    
+    private func updateDrawingControls() {
+        let hasDrawings = drawingOverlay.hasDrawings
+        undoBarButton.isEnabled = hasDrawings
+        undoBarButton.tintColor = hasDrawings ? .label : .secondaryLabel
+        clearAllBarButton.isEnabled = hasDrawings
+        clearAllBarButton.tintColor = hasDrawings ? .secondaryLabel : .tertiaryLabel
+        
+        // Show/hide AI analysis button based on whether there are drawings
+        UIView.animate(withDuration: 0.3, delay: 0, options: .curveEaseInOut) {
+            self.aiAnalysisButton.alpha = hasDrawings ? 1 : 0
+        }
+    }
+    
+    // MARK: - Drawing Actions
+    
+    @objc private func toggleDrawingMode() {
+        isDrawingEnabled.toggle()
+    }
+    
+    @objc private func undoLastDrawing() {
+        drawingOverlay.undoLastPath()
+        updateDrawingControls()
+    }
+    
+    @objc private func clearAllDrawing() {
+        drawingOverlay.clearAllPaths()
+        updateDrawingControls()
+    }
+    
+    @objc private func addDrawingToChat() {
+        guard drawingOverlay.hasDrawings else { return }
+        
+        // Capture the annotated area from the scroll view (like EPUB does)
+        guard let drawnImage = drawingOverlay.captureAnnotatedArea(from: scrollView) else { return }
+        
+        // Exit drawing mode
+        isDrawingEnabled = false
+        
+        // Clear the drawings
+        drawingOverlay.clearAllPaths()
+        updateDrawingControls()
+        
+        // Add the image to chat and send for analysis
+        guard let analysis = currentAnalysis else { return }
+        
+        // The prompt to send with the circled image
+        let imagePrompt = "Please explain what I've circled in this screenshot."
+        
+        // Add image message to chat history BEFORE sending (this also saves the image to Core Data)
+        analysis.appendToChatHistory(role: "user", content: imagePrompt, image: drawnImage)
+        
+        // Get the last message to retrieve the stored image (reconstructed from PNG data)
+        let chatHistory = analysis.getChatHistory()
+        let storedImage: UIImage?
+        if let lastMessage = chatHistory.last {
+            storedImage = analysis.getFollowUpImage(for: lastMessage)
+        } else {
+            storedImage = drawnImage
+        }
+        
+        // Add image to chat UI (use stored image for consistency)
+        let imageMessageView = ChatImageMessageView()
+        imageMessageView.setImage(storedImage ?? drawnImage, maxWidth: view.bounds.width - 76)
+        messagesStackView.addArrangedSubview(imageMessageView)
+        imageMessageViews.append(imageMessageView)
+        
+        // Scroll to bottom to show the new image
+        DispatchQueue.main.async { [weak self] in
+            guard let self = self else { return }
+            let bottomOffset = CGPoint(
+                x: 0,
+                y: max(0, self.scrollView.contentSize.height - self.scrollView.bounds.height + self.scrollView.contentInset.bottom)
+            )
+            self.scrollView.setContentOffset(bottomOffset, animated: true)
+        }
+        
+        // Show loading state
+        setLoading(true)
+        
+        // Create a streaming bubble for the response
+        let responseBubble = ChatMessageBubbleView(role: "model")
+        messagesStackView.addArrangedSubview(responseBubble)
+        messageBubbles.append(responseBubble)
+        streamingBubble = responseBubble
+        streamingContent = ""
+        
+        // Send for analysis using the stored/reconstructed image (from PNG data)
+        Task {
+            await AIAnalysisManager.shared.sendFollowUp(
+                question: imagePrompt,
+                image: storedImage ?? drawnImage,
+                analysis: analysis
+            ) { [weak self] chunk in
+                DispatchQueue.main.async {
+                    self?.appendFollowUpText(chunk)
+                }
+            }
+            
+            DispatchQueue.main.async { [weak self] in
+                self?.setLoading(false)
+                self?.updateBottomToolbarItems()
+                self?.showInputField()
+            }
+        }
+    }
+    
+    @objc private func closeTapped() {
+        dismiss(animated: true)
+    }
+    
+    @objc private func retryAnalysis() {
+        let alert = UIAlertController(
+            title: "Retry Analysis",
+            message: "This will regenerate the analysis. Continue?",
+            preferredStyle: .alert
+        )
+        
+        alert.addAction(UIAlertAction(title: "Cancel", style: .cancel))
+        alert.addAction(UIAlertAction(title: "Retry", style: .default) { [weak self] _ in
+            self?.performRetryAnalysis()
+        })
+        
+        present(alert, animated: true)
+    }
+    
+    private func performRetryAnalysis() {
+        guard let analysis = currentAnalysis else { return }
+        
+        // Clear current messages
+        clearMessages()
+        
+        // Show loading state
+        setLoading(true, isInitialAnalysis: true)
+        
+        // Retry the analysis
+        Task {
+            await AIAnalysisManager.shared.retryAnalysis(analysis) { [weak self] chunk in
+                DispatchQueue.main.async {
+                    self?.appendText(chunk)
+                }
+            }
+            
+            DispatchQueue.main.async {
+                self.setLoading(false)
+                if let timestamp = self.currentAnalysis?.formattedCompletedDate {
+                    self.setTimestamp("Analyzed \(timestamp)")
+                }
+                self.updateBottomToolbarItems()
+            }
+        }
     }
     
     // MARK: - Public Methods
@@ -448,10 +1141,20 @@ class AIAnalysisViewController: UIViewController {
             }
             isFirstUserMessage = false
             
-            let bubble = ChatMessageBubbleView(role: message.role)
-            bubble.setContent(message.content, width: width)
-            messagesStackView.addArrangedSubview(bubble)
-            messageBubbles.append(bubble)
+            // Check if this message has an image attachment
+            if let image = analysis.getFollowUpImage(for: message) {
+                // Create image message view (don't show the prompt text with the image)
+                let imageMessageView = ChatImageMessageView()
+                imageMessageView.setImage(image, maxWidth: width - 76)
+                messagesStackView.addArrangedSubview(imageMessageView)
+                imageMessageViews.append(imageMessageView)
+            } else {
+                // Regular text-only message
+                let bubble = ChatMessageBubbleView(role: message.role)
+                bubble.setContent(message.content, width: width)
+                messagesStackView.addArrangedSubview(bubble)
+                messageBubbles.append(bubble)
+            }
         }
         
         // Show input field when not generating
@@ -530,6 +1233,13 @@ class AIAnalysisViewController: UIViewController {
             bubble.removeFromSuperview()
         }
         messageBubbles.removeAll()
+        
+        // Clear image message views
+        for imageView in imageMessageViews {
+            imageView.removeFromSuperview()
+        }
+        imageMessageViews.removeAll()
+        
         streamingBubble = nil
         streamingContent = ""
     }
@@ -631,7 +1341,7 @@ class AIAnalysisViewController: UIViewController {
     
     // MARK: - Private Methods
     
-    private func confirmDelete() {
+    @objc private func confirmDelete() {
         let alert = UIAlertController(
             title: "Delete Analysis",
             message: "This will delete the annotation and its analysis. This action cannot be undone.",
@@ -726,9 +1436,13 @@ class AIAnalysisViewController: UIViewController {
         // Hide input field while generating
         hideInputField()
         
-        // Add user message bubble
+        // Add user message to chat history BEFORE sending (so it's included in the API call)
+        analysis.appendToChatHistory(role: "user", content: question)
+        
+        // Add text bubble to UI
+        let width = view.bounds.width
         let userBubble = ChatMessageBubbleView(role: "user")
-        userBubble.setContent(question, width: view.bounds.width)
+        userBubble.setContent(question, width: width)
         messagesStackView.addArrangedSubview(userBubble)
         messageBubbles.append(userBubble)
         
@@ -742,9 +1456,13 @@ class AIAnalysisViewController: UIViewController {
         streamingBubble = responseBubble
         streamingContent = ""
         
-        // Send follow-up to API
+        // Send follow-up to API (user message already in history)
         Task {
-            await AIAnalysisManager.shared.sendFollowUp(question: question, analysis: analysis) { [weak self] chunk in
+            await AIAnalysisManager.shared.sendFollowUp(
+                question: question,
+                image: nil,
+                analysis: analysis
+            ) { [weak self] chunk in
                 DispatchQueue.main.async {
                     self?.appendFollowUpText(chunk)
                 }
@@ -774,6 +1492,64 @@ class AIAnalysisViewController: UIViewController {
         inputTextViewHeightConstraint?.constant = newHeight
         inputTextView.isScrollEnabled = sizeThatFits.height > maxHeight
     }
+    
+    // MARK: - Title Image Tap (for viewing, not drawing)
+    
+    @objc private func titleImageTapped() {
+        // Just show the image in a quick look or preview - no drawing here
+        // Drawing is done on the scroll view content instead
+        guard let image = screenshotImage else { return }
+        
+        // Create simple full-screen preview
+        let containerView = UIView()
+        containerView.backgroundColor = UIColor.black.withAlphaComponent(0.9)
+        containerView.alpha = 0
+        containerView.translatesAutoresizingMaskIntoConstraints = false
+        view.addSubview(containerView)
+        
+        NSLayoutConstraint.activate([
+            containerView.topAnchor.constraint(equalTo: view.topAnchor),
+            containerView.leadingAnchor.constraint(equalTo: view.leadingAnchor),
+            containerView.trailingAnchor.constraint(equalTo: view.trailingAnchor),
+            containerView.bottomAnchor.constraint(equalTo: view.bottomAnchor),
+        ])
+        
+        // Create image view
+        let imageView = UIImageView(image: image)
+        imageView.contentMode = .scaleAspectFit
+        imageView.clipsToBounds = true
+        imageView.layer.cornerRadius = 12
+        imageView.layer.cornerCurve = .continuous
+        imageView.translatesAutoresizingMaskIntoConstraints = false
+        containerView.addSubview(imageView)
+        
+        NSLayoutConstraint.activate([
+            imageView.centerXAnchor.constraint(equalTo: containerView.centerXAnchor),
+            imageView.centerYAnchor.constraint(equalTo: containerView.centerYAnchor),
+            imageView.widthAnchor.constraint(lessThanOrEqualTo: containerView.widthAnchor, constant: -40),
+            imageView.heightAnchor.constraint(lessThanOrEqualTo: containerView.heightAnchor, constant: -80),
+        ])
+        
+        // Animate in
+        UIView.animate(withDuration: 0.25) {
+            containerView.alpha = 1
+        }
+        
+        // Add tap to dismiss
+        let tapToDismiss = UITapGestureRecognizer(target: self, action: #selector(dismissImagePreview(_:)))
+        containerView.addGestureRecognizer(tapToDismiss)
+        containerView.tag = 999 // Tag for finding later
+    }
+    
+    @objc private func dismissImagePreview(_ gesture: UITapGestureRecognizer) {
+        guard let containerView = gesture.view else { return }
+        
+        UIView.animate(withDuration: 0.25, animations: {
+            containerView.alpha = 0
+        }) { _ in
+            containerView.removeFromSuperview()
+        }
+    }
 }
 
 // MARK: - UITextViewDelegate
@@ -788,5 +1564,29 @@ extension AIAnalysisViewController: UITextViewDelegate {
         
         // Update height
         updateInputTextViewHeight()
+    }
+}
+
+// MARK: - AIAnalysisDrawingDelegate
+
+extension AIAnalysisViewController: AIAnalysisDrawingDelegate {
+    func drawingOverlayDidChange(hasAnnotations: Bool) {
+        updateDrawingControls()
+    }
+    
+    func drawingOverlayDidCompleteStroke() {
+        updateDrawingControls()
+    }
+}
+
+// MARK: - UIGestureRecognizerDelegate
+
+extension AIAnalysisViewController: UIGestureRecognizerDelegate {
+    func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
+        // Don't trigger tap on toolbar buttons
+        if touch.view is UIControl {
+            return false
+        }
+        return true
     }
 }
