@@ -56,7 +56,7 @@ class PDFViewController: UIViewController {
     
     lazy var clearAllBarButton: UIBarButtonItem = {
         let button = UIBarButtonItem(
-            image: UIImage(systemName: "xmark.circle.fill"),
+            image: UIImage(systemName: "delete.left"),
             style: .plain,
             target: self,
             action: #selector(clearAllAnnotations)

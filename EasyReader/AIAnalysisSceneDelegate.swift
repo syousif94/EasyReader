@@ -64,7 +64,7 @@ class AIAnalysisSceneDelegate: UIResponder, UIWindowSceneDelegate {
         
         let userInfo = activity.userInfo
         
-        // Set image if available
+        // Set image if available from userInfo
         if let imageData = userInfo?[AIAnalysisActivity.UserInfoKeys.imageData] as? Data,
            let image = UIImage(data: imageData) {
             analysisVC.setImage(image)
@@ -76,6 +76,13 @@ class AIAnalysisSceneDelegate: UIResponder, UIWindowSceneDelegate {
            let analysis = AIAnalysisManager.shared.getAnalysis(byID: analysisID) {
             
             analysisVC.currentAnalysis = analysis
+            
+            // Load image from analysis if not already set from userInfo (e.g., during state restoration)
+            if analysisVC.screenshotImage == nil,
+               let imageData = analysis.imageData,
+               let image = UIImage(data: imageData) {
+                analysisVC.setImage(image)
+            }
             
             if analysis.isCompleted {
                 analysisVC.setLoading(false)

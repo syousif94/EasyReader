@@ -529,7 +529,7 @@ class AIAnalysisViewController: UIViewController {
     var onDelete: (() -> Void)?
     
     // Screenshot image to display in nav bar
-    private var screenshotImage: UIImage?
+    private(set) var screenshotImage: UIImage?
     
     // Reference to the current analysis for follow-up questions
     var currentAnalysis: AIAnalysisResult?
@@ -688,7 +688,7 @@ class AIAnalysisViewController: UIViewController {
     
     private lazy var clearAllBarButton: UIBarButtonItem = {
         let button = UIBarButtonItem(
-            image: UIImage(systemName: "xmark.circle.fill"),
+            image: UIImage(systemName: "delete.left"),
             style: .plain,
             target: self,
             action: #selector(clearAllDrawing)
@@ -887,7 +887,7 @@ class AIAnalysisViewController: UIViewController {
         drawingOverlayHeightConstraint?.constant = contentHeight
         
         let insets = view.safeAreaInsets
-        let bottomInset = insets.bottom
+        let bottomInset = insets.bottom > 0 ? insets.bottom : 20
         
         // Layout the bottom toolbar using PinLayout (like PDFViewController)
         layoutBottomToolbar(bottomInset: bottomInset)
